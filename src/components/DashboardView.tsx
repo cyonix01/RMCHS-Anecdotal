@@ -1,0 +1,1233 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect } from "react";
+import { LogOut, Shield, Settings2, ShieldCheck, Sun, Clock, Calendar, Compass, Clipboard, UserPlus, FileText, Table, BarChart3, TrendingUp, ArrowUpRight, ArrowDownRight, ShieldAlert, Database, Layers, Trash2, Plus, Edit, Download, CheckSquare, Square, UserCheck, History } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { UserAccount, Report, CriticalReport } from "../types";
+import AccountSettingsView from "./AccountSettingsView";
+import RegisterStudentModal from "./RegisterStudentModal";
+import StudentSearchModal from "./StudentSearchModal";
+import CICLSearchModal from "./CICLSearchModal";
+import DataAnalyticsView from "./DataAnalyticsView";
+import AnecdoteChart from "./AnecdoteChart";
+import SectionManagerModal from "./SectionManagerModal";
+import ReportsViewerModal from "./ReportsViewerModal";
+import AdviserAssignmentModal from "./AdviserAssignmentModal";
+import SignatorySettingsModal from "./SignatorySettingsModal";
+import { AdminPasswordsModal } from "./AdminPasswordsModal";
+import { AuditLogModal } from "./AuditLogModal";
+import NotificationBell from "./NotificationBell";
+import { useNotification } from "./NotificationProvider";
+import StudentListDashboard from "./StudentListDashboard";
+
+function parseRobustDateTime(val: any): Date | null {
+  if (val === null || val === undefined) return null;
+  
+  if (val instanceof Date) {
+    return isNaN(val.getTime()) ? null : val;
+  }
+  
+  if (typeof val === "number") {
+    const adjusted = val < 10000000000 ? val * 1000 : val;
+    const d = new Date(adjusted);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  
+  if (typeof val === "string") {
+    let trimmed = val.trim();
+    if (!trimmed) return null;
+    
+    if (/^\d+$/.test(trimmed)) {
+      const num = Number(trimmed);
+      const adjusted = num < 10000000000 ? num * 1000 : num;
+      const d = new Date(adjusted);
+      if (!isNaN(d.getTime())) return d;
+    }
+    
+    if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(:\d{2})?(\.\d+)?$/.test(trimmed)) {
+      trimmed = trimmed.replace(/\s+/, 'T');
+    }
+    
+    let d = new Date(trimmed);
+    if (!isNaN(d.getTime())) return d;
+    
+    d = new Date(trimmed.replace(/\//g, '-'));
+    if (!isNaN(d.getTime())) return d;
+  }
+  
+  return null;
+}
+
+function getReportSortValue(report: any): number {
+  if (!report) return 0;
+  
+  const dateReportedVal = report.dateReported;
+  const parsedReported = parseRobustDateTime(dateReportedVal);
+  if (parsedReported) {
+    return parsedReported.getTime();
+  }
+  
+  const dateOfIncidentVal = report.dateOfIncident;
+  const timeOfIncidentVal = report.timeOfIncident;
+  
+  if (dateOfIncidentVal) {
+    const datePart = String(dateOfIncidentVal).trim();
+    const timePart = String(timeOfIncidentVal || "00:00").trim();
+    const parsedIncident = parseRobustDateTime(`${datePart}T${timePart}`);
+    if (parsedIncident) {
+      return parsedIncident.getTime();
+    }
+    const parsedJustDate = parseRobustDateTime(datePart);
+    if (parsedJustDate) {
+      return parsedJustDate.getTime();
+    }
+  }
+  
+  return 0;
+}
+
+const ciclOffenses = ["Theft", "Robbery", "Physical injuries", "Sexual harassment", "Rape", "Homicide", "Murder", "Drug-related"];
+
+const mapToCategory = (issue?: string) => {
+  if (!issue) return "Others";
+  const attendanceIssues = [
+    "Habitual tardiness", 
+    "Cutting classes / Unexcused absences", 
+    "Truancy or Child labor", 
+    "Repeated or severe cases of cutting classes"
+  ];
+  const academicIssues = [
+    "Inattentiveness / sleeping in class", 
+    "Using gadgets during class hour without permission", 
+    "Copying assignments or mild cheating"
+  ];
+  const behavioralIssues = [
+    "Talking back to teachers", 
+    "Dress code violations", 
+    "Minor class disturbances (e.g. noise, jokes)", 
+    "Peer misunderstanding or minor peer conflicts", 
+    "Vandalism (minor cases like writing on desks)", 
+    "Extreme defiance of authority or insubordination", 
+    "Physical altercation or Fights", 
+    "Bullying (Physical, Emotional, or Cyberbullying)"
+  ];
+  
+  if (attendanceIssues.some(i => issue.includes(i))) return "Attendance";
+  if (academicIssues.some(i => issue.includes(i))) return "Academic";
+  if (behavioralIssues.some(i => issue.includes(i))) return "Behavioral";
+  return "Others";
+};
+
+interface DashboardViewProps {
+  user: Partial<UserAccount>;
+  onLogout: (reason?: string) => void;
+  onUpdateUser: (freshUser: Partial<UserAccount>) => void;
+}
+
+export default function DashboardView({ user: propsUser, onLogout, onUpdateUser }: DashboardViewProps) {
+  const isMountedRef = React.useRef(true);
+  React.useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const user = React.useMemo(() => ({
+    ...propsUser,
+    firstName: propsUser.firstName || "User",
+    lastName: propsUser.lastName || "",
+    role: (propsUser.role || "Non-Adviser") as UserAccount['role'],
+    gradeLevel: propsUser.gradeLevel as UserAccount['gradeLevel'],
+    section: propsUser.section || ""
+  }), [propsUser]);
+  const { notify, confirm } = useNotification();
+  const [showSettings, setShowSettings] = useState(false);
+  const [showRegisterStudent, setShowRegisterStudent] = useState(false);
+  const [showStudentSearch, setShowStudentSearch] = useState(false);
+  const [showCICLReport, setShowCICLReport] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showAdminMenu, setShowAdminMenu] = useState(false);
+  const [showDatabaseActions, setShowDatabaseActions] = useState(false);
+  const [showSectionManager, setShowSectionManager] = useState(false);
+  const [showReportsViewer, setShowReportsViewer] = useState(false);
+  const [showResolvedReportsViewer, setShowResolvedReportsViewer] = useState(false);
+  const [showPendingApprovalViewer, setShowPendingApprovalViewer] = useState(false);
+  const [reportsViewerQuery, setReportsViewerQuery] = useState("");
+  const [showAdviserAssignment, setShowAdviserAssignment] = useState(false);
+  const [showSignatorySettingsModal, setShowSignatorySettingsModal] = useState(false);
+  const [showAdminPasswordsModal, setShowAdminPasswordsModal] = useState(false);
+  const [showAuditLogs, setShowAuditLogs] = useState(false);
+  const [adminAction, setAdminAction] = useState<{ type: string, email?: string } | null>(null);
+  const [adminActionPassword, setAdminActionPassword] = useState("");
+  const [chartData, setChartData] = useState<{ category: string; count: number }[]>([]);
+  const [monthlyTrend, setMonthlyTrend] = useState<{ month: string; count: number }[]>([]);
+  const [topStudents, setTopStudents] = useState<{ name: string; lrn: string; count: number }[]>([]);
+  const [allTeacherReports, setAllTeacherReports] = useState<any[]>([]);
+  const [trendData, setTrendData] = useState<{ totalChange: number; academicChange: number; behavioralChange: number }>({ totalChange: 0, academicChange: 0, behavioralChange: 0 });
+  const [stats, setStats] = useState({
+    dailyGeneral: 0, totalGeneral: 0,
+    dailyCritical: 0, totalCritical: 0,
+    dailyCICL: 0, totalCICL: 0
+  });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
+  const [selectedReports, setSelectedReports] = useState<{id: string | number, type: string}[]>([]);
+
+  const handleSelectReport = (report: any) => {
+    setSelectedReports(prev => {
+      const isSelected = prev.some(r => r.id === report.id && r.type === report.type);
+      if (isSelected) {
+        return prev.filter(r => !(r.id === report.id && r.type === report.type));
+      } else {
+        return [...prev, { id: report.id, type: report.type }];
+      }
+    });
+  };
+
+  const handleSelectAll = (reportsInView: any[]) => {
+    if (selectedReports.length === reportsInView.length) {
+      setSelectedReports([]);
+    } else {
+      setSelectedReports(reportsInView.map(r => ({ id: r.id, type: r.type })));
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedReports.length === 0) return;
+
+    confirm({
+      title: "Bulk Deletion",
+      message: `Are you sure you want to permanently delete ${selectedReports.length} selected reports? This action is irreversible.`,
+      confirmText: "Delete All",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          const results = await Promise.all(selectedReports.map(report => {
+            const endpoint = report.type === 'General' ? `/api/reports/${report.id}` : `/api/critical-reports/${report.id}`;
+            return fetch(endpoint, { method: 'DELETE' });
+          }));
+
+          if (results.every(r => r.ok)) {
+            notify("success", `${selectedReports.length} reports successfully removed.`);
+            setSelectedReports([]);
+            // Refresh data
+            window.location.reload(); // Simple refresh for now, or I could re-fetch
+          } else {
+            notify("error", "Some records failed to delete.");
+          }
+        } catch (err) {
+          notify("error", "Network error during bulk operation.");
+        }
+      }
+    });
+  };
+
+  const handleExportSelected = () => {
+    if (selectedReports.length === 0) return;
+
+    const reportsToExport = allTeacherReports.filter(r => 
+      selectedReports.some(sr => sr.id === r.id && sr.type === r.type)
+    );
+
+    const csvContent = [
+      ["Type", "Date", "LRN", "Issue", "Description", "Status"],
+      ...reportsToExport.map(r => [
+        r.type,
+        r.dateReported,
+        r.studentLrn,
+        r.issue,
+        `"${(r.description || "").replace(/"/g, '""')}"`,
+        r.recordStatus || "N/A"
+      ])
+    ].map(e => e.join(",")).join("\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Bulk_Export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    notify("success", `${selectedReports.length} records archived to CSV.`);
+  };
+
+  const fetchData = React.useCallback(async () => {
+    if (!isMountedRef.current) return;
+    try {
+      const [reports, criticalReports, students] = await Promise.all([
+        fetch("/api/reports").then(res => { if (!res.ok) throw new Error("reports"); return res.json(); }),
+        fetch("/api/critical-reports").then(res => { if (!res.ok) throw new Error("critical-reports"); return res.json(); }),
+        fetch("/api/students").then(res => { if (!res.ok) throw new Error("students"); return res.json(); })
+      ]);
+      
+      if (!isMountedRef.current) return;
+      
+      if (reports.error) throw new Error(reports.error);
+      if (criticalReports.error) throw new Error(criticalReports.error);
+      if (students.error) throw new Error(students.error);
+      const teacherName = `${user.firstName} ${user.lastName}`;
+      // Use local date (YYYY-MM-DD) instead of UTC to match "Today's" reports correctly
+      const todayStr = new Date().toLocaleDateString('en-CA');
+
+      let filteredGeneral = reports;
+      let filteredCritical = criticalReports;
+
+      if (user.role === 'Admin' || user.role === 'Guidance' || user.role === 'Department Head') {
+        // Admin and Guidance see all records across entire school
+      } else if (user.role === 'Adviser') {
+        // Advisers see only records of students in their assigned gradeLevel and section
+        const adviserGrade = user.gradeLevel;
+        const adviserSection = user.section;
+        const studentMap = new Map<string, any>(students.map((s: any) => [s.lrn, s]));
+        
+        filteredGeneral = reports.filter((r: any) => {
+          const student = studentMap.get(r.studentLrn);
+          return student && student.gradeLevel === adviserGrade && student.section === adviserSection;
+        });
+        
+        filteredCritical = criticalReports.filter((r: any) => {
+          const student = studentMap.get(r.studentLrn);
+          return student && student.gradeLevel === adviserGrade && student.section === adviserSection;
+        });
+      } else {
+        // Fallback or Non-Adviser (only see reports they reported or created)
+        filteredGeneral = reports.filter((r: any) => r.reportedBy === teacherName || r.createdBy === user.email);
+        filteredCritical = criticalReports.filter((r: any) => r.reportedBy === teacherName);
+      }
+
+      const teacherReports = [
+        ...filteredGeneral.map((r: any) => ({ ...r, type: 'General' })),
+        ...filteredCritical.map((r: any) => ({ 
+          ...r, 
+          issue: r.issue || r.natureOfIncident || 'Critical Incident',
+          dateOfIncident: r.dateOfIncident || r.incidentDate || '',
+          timeOfIncident: r.timeOfIncident || r.incidentTime || '',
+          actionTaken: r.actionTaken || r.immediateActionTaken || 'N/A',
+          type: 'Critical' 
+        }))
+      ].sort((a, b) => {
+        const valA = getReportSortValue(a);
+        const valB = getReportSortValue(b);
+        if (valA !== valB) return valB - valA;
+        return String(b.id || "").localeCompare(String(a.id || ""));
+      });
+
+      setAllTeacherReports(teacherReports);
+
+      // Calculate Top Students
+      const studentReferralCounts: Record<string, number> = {};
+      teacherReports.forEach((r: any) => {
+        const lrn = r.studentLrn;
+        studentReferralCounts[lrn] = (studentReferralCounts[lrn] || 0) + 1;
+      });
+
+      const sortedStudents = Object.entries(studentReferralCounts)
+        .map(([lrn, count]) => {
+          const student = students.find((s: any) => s.lrn === lrn);
+          return {
+            lrn,
+            count,
+            name: student ? `${student.firstName} ${student.lastName}` : `Student ${lrn}`
+          };
+        })
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+      setTopStudents(sortedStudents);
+
+      // Calculate Stats for Counters
+      const generalReports = filteredGeneral.filter((r: any) => !ciclOffenses.includes(r.issue));
+      const ciclReports = filteredGeneral.filter((r: any) => ciclOffenses.includes(r.issue));
+      const teacherCritical = filteredCritical;
+
+      setStats({
+        totalGeneral: generalReports.length,
+        dailyGeneral: generalReports.filter((r: any) => {
+          if (!r.dateReported) return false;
+          const reportDate = new Date(r.dateReported).toLocaleDateString('en-CA');
+          return reportDate === todayStr;
+        }).length,
+        totalCICL: ciclReports.length,
+        dailyCICL: ciclReports.filter((r: any) => {
+          if (!r.dateReported) return false;
+          const reportDate = new Date(r.dateReported).toLocaleDateString('en-CA');
+          return reportDate === todayStr;
+        }).length,
+        totalCritical: teacherCritical.length,
+        dailyCritical: teacherCritical.filter((r: any) => {
+          if (!r.dateReported) return false;
+          const reportDate = new Date(r.dateReported).toLocaleDateString('en-CA');
+          return reportDate === todayStr;
+        }).length
+      });
+
+      const counts: Record<string, number> = {
+        Attendance: 0,
+        Academic: 0,
+        Behavioral: 0,
+        Others: 0
+      };
+
+      teacherReports.forEach((r: any) => {
+        const category = mapToCategory(r.issue);
+        counts[category]++;
+      });
+
+      setChartData(Object.entries(counts).map(([category, count]) => ({ category, count })));
+
+      // Calculate Trends
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+      
+      const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+      const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+
+      const thisMonthReports = teacherReports.filter((r: any) => {
+        const d = new Date(r.dateReported);
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      });
+
+      const lastMonthReports = teacherReports.filter((r: any) => {
+        const d = new Date(r.dateReported);
+        return d.getMonth() === lastMonth && d.getFullYear() === lastMonthYear;
+      });
+
+      const calculateChange = (current: any[], previous: any[], filterFn?: (r: any) => boolean) => {
+        const curCount = filterFn ? current.filter(filterFn).length : current.length;
+        const prevCount = filterFn ? previous.filter(filterFn).length : previous.length;
+        if (prevCount === 0) return curCount > 0 ? 100 : 0;
+        return Math.round(((curCount - prevCount) / prevCount) * 100);
+      };
+
+      setTrendData({
+        totalChange: calculateChange(thisMonthReports, lastMonthReports),
+        academicChange: calculateChange(thisMonthReports, lastMonthReports, (r) => mapToCategory(r.issue) === 'Academic'),
+        behavioralChange: calculateChange(thisMonthReports, lastMonthReports, (r) => mapToCategory(r.issue) === 'Behavioral')
+      });
+
+      // Calculate Monthly Trend for Academic Year (June to May)
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const acYearStartMonth = 5; // June
+      const acYearStartYear = now.getMonth() >= acYearStartMonth ? now.getFullYear() : now.getFullYear() - 1;
+      
+      const academicYearData: { month: string; count: number }[] = [];
+      for (let i = 0; i < 12; i++) {
+        const d = new Date(acYearStartYear, acYearStartMonth + i, 1);
+        const m = d.getMonth();
+        const y = d.getFullYear();
+        const label = `${monthNames[m]} ${y.toString().slice(-2)}`;
+        
+        const count = teacherReports.filter((r: any) => {
+          const rd = new Date(r.dateReported);
+          return rd.getMonth() === m && rd.getFullYear() === y;
+        }).length;
+        
+        academicYearData.push({ month: label, count });
+      }
+      setMonthlyTrend(academicYearData);
+    } catch (err) {
+      console.error(err);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 10000);
+  
+  return () => clearInterval(interval);
+  }, [fetchData]);
+
+  const filteredReports = allTeacherReports.filter(report => {
+    const matchesSearch = 
+      report.studentLrn?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      report.issue?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      report.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const category = mapToCategory(report.issue);
+    const matchesCategory = categoryFilter === "All" || category === categoryFilter;
+
+    return matchesSearch && matchesCategory;
+  });
+
+  const onGoingReportsCount = allTeacherReports.filter(r => (r.recordStatus || 'On Going').trim().toUpperCase() === 'ON GOING').length;
+  const pendingApprovalReportsCount = allTeacherReports.filter(r => {
+    const s = (r.recordStatus || '').trim().toUpperCase();
+    return s === 'PENDING APPROVAL' || s === 'PENDING';
+  }).length;
+
+  return (
+    <div id="dashboard-layout" className="min-h-screen bg-slate-50 flex flex-col font-sans text-[#102604]">
+      
+      {/* Institutional Top Navbar */}
+      <header id="dashboard-navbar" className="bg-white border-b border-slate-200 px-8 py-4 shrink-0 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+        <div className="flex items-center gap-3">
+          <img 
+            src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/88/Ramon_Magsaysay_%28Cubao%29_High_School.svg/500px-Ramon_Magsaysay_%28Cubao%29_High_School.svg.png"
+            alt="RMCHS Crest"
+            className="w-12 h-12 object-contain rounded-full bg-white p-1 border border-[#FFEA00] shadow-sm"
+            referrerPolicy="no-referrer"
+          />
+          <div>
+            <h1 id="navbar-app-title" className="serif font-serif font-bold text-[#102604] tracking-tight text-lg">RMCHS Anecdotal Portal</h1>
+            <p className="text-[9px] text-slate-500 font-bold font-sans uppercase tracking-widest">Faculty & Staff Management System</p>
+          </div>
+        </div>
+
+        {/* Action controls */}
+        <div className="flex flex-wrap items-center justify-center md:justify-end gap-2">
+          {(user.role === 'Admin' || user.role === 'Adviser') && (
+            <button
+              id="register-student-trigger"
+              onClick={() => setShowRegisterStudent(true)}
+              className="group flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:border-[#76DA0D] hover:bg-slate-50 text-[#102604] font-bold text-[10px] tracking-widest uppercase transition-all cursor-pointer select-none h-10 shadow-sm"
+            >
+              <UserPlus size={14} className="text-[#76DA0D]" />
+              <span>Register</span>
+            </button>
+          )}
+          
+          {(user.role === 'Admin' || user.role === 'Adviser' || user.role === 'Guidance' || user.role === 'Department Head') && (
+            <button
+              onClick={() => setShowStudentSearch(true)}
+              className="group flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:border-[#76DA0D] hover:bg-slate-50 text-[#102604] font-bold text-[10px] tracking-widest uppercase transition-all cursor-pointer select-none h-10 shadow-sm"
+            >
+              <FileText size={14} className="text-[#76DA0D]" />
+              <span>Report</span>
+            </button>
+          )}
+
+          {(user.role === 'Admin' || user.role === 'Adviser' || user.role === 'Guidance' || user.role === 'Department Head') && (
+            <button
+              onClick={() => setShowCICLReport(true)}
+              className="group flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:border-red-500 hover:bg-red-50/30 text-[#102604] font-bold text-[10px] tracking-widest uppercase transition-all cursor-pointer select-none h-10 shadow-sm"
+            >
+              <FileText size={14} className="text-red-500" />
+              <span>CICL</span>
+            </button>
+          )}
+
+          {(user.role === 'Admin' || user.role === 'Guidance' || user.role === 'Department Head') && (
+            <button
+              onClick={() => setShowAnalytics(!showAnalytics)}
+              className={`group flex items-center gap-2 px-4 py-2 border font-bold text-[10px] tracking-widest uppercase transition-all cursor-pointer select-none h-10 shadow-sm ${
+                showAnalytics 
+                ? 'bg-[#102604] text-white border-[#102604]' 
+                : 'bg-white border-slate-200 hover:border-blue-500 hover:bg-blue-50/30 text-[#102604]'
+              }`}
+            >
+              <BarChart3 size={14} className={showAnalytics ? "text-[#76DA0D]" : "text-blue-500"} />
+              <span>Analytics</span>
+            </button>
+          )}
+
+          <button
+            id="settings-trigger"
+            onClick={() => setShowSettings(true)}
+            className="group flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:border-[#FFEA00] hover:bg-slate-50 text-[#102604] font-bold text-[10px] tracking-widest uppercase transition-all cursor-pointer select-none h-10 shadow-sm"
+          >
+            <Settings2 size={14} className="text-[#76DA0D]" />
+            <span>Profile</span>
+          </button>
+
+          {(user.role === 'Admin' || user.role === 'Guidance' || user.role === 'Department Head') && (
+            <button
+              id="view-reports-btn"
+              onClick={() => setShowReportsViewer(true)}
+              className="group flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 font-bold text-[10px] tracking-widest uppercase transition-all hover:border-[#102604] hover:bg-slate-50 text-[#102604] cursor-pointer select-none h-10 shadow-sm"
+            >
+              <FileText size={14} className="text-[#102604]" />
+              <span>View Reports</span>
+              {onGoingReportsCount > 0 && (
+                <span className="bg-[#102604] text-white text-[9px] px-1.5 py-0.5 rounded-sm">
+                  {onGoingReportsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {(user.role === 'Admin' || user.role === 'Guidance' || user.role === 'Department Head') && (
+            <button
+              id="view-resolved-reports-btn"
+              onClick={() => setShowResolvedReportsViewer(true)}
+              className="group flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 font-bold text-[10px] tracking-widest uppercase transition-all hover:border-[#76DA0D] hover:bg-slate-50 text-[#102604] cursor-pointer select-none h-10 shadow-sm"
+            >
+              <FileText size={14} className="text-[#76DA0D]" />
+              <span>View Resolved</span>
+            </button>
+          )}
+
+          {(user.role === 'Admin' || user.role === 'Principal' || user.position?.toLowerCase().includes('principal')) && (
+            <button
+              id="view-pending-approval-reports-btn"
+              onClick={() => setShowPendingApprovalViewer(true)}
+              className="group flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 font-bold text-[10px] tracking-widest uppercase transition-all hover:border-blue-500 hover:bg-slate-50 text-[#102604] cursor-pointer select-none h-10 shadow-sm"
+            >
+              <FileText size={14} className="text-blue-500" />
+              <span>Pending Approval</span>
+              {pendingApprovalReportsCount > 0 && (
+                <span className="bg-blue-500 text-white text-[9px] px-1.5 py-0.5 rounded-sm">
+                  {pendingApprovalReportsCount}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* Admin Button with Dropdown */}
+          {(user.role === 'Admin' || user.role === 'Department Head' || user.role === 'Adviser') && (
+            <div className="relative">
+              <button
+                id="admin-menu-trigger"
+                onClick={() => setShowAdminMenu(!showAdminMenu)}
+                className={`group flex items-center gap-2 px-4 py-2 border font-bold text-[10px] tracking-widest uppercase transition-all cursor-pointer select-none h-10 shadow-sm ${
+                  showAdminMenu || showDatabaseActions || showSectionManager
+                  ? 'bg-[#102604] text-white border-[#102604]' 
+                  : 'bg-white border-slate-200 hover:border-red-500 hover:bg-slate-50 text-[#102604]'
+                }`}
+              >
+                <ShieldAlert size={14} className={showAdminMenu ? "text-[#76DA0D]" : "text-red-500"} />
+                <span>{user.role === 'Adviser' ? 'Settings' : 'Admin'}</span>
+              </button>
+
+              <AnimatePresence>
+                {showAdminMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 shadow-xl z-50 py-1"
+                  >
+                    {user.role === 'Admin' && (
+                      <button
+                        onClick={() => {
+                          setShowDatabaseActions(true);
+                          setShowAdminMenu(false);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-left text-[11px] font-bold text-[#102604] uppercase tracking-wider transition-colors"
+                      >
+                        <Database size={14} className="text-[#76DA0D]" />
+                        <span>Database</span>
+                      </button>
+                    )}
+                    {(user.role === 'Admin' || user.role === 'Department Head') && (
+                      <>
+                        <button
+                          onClick={() => {
+                            setShowSectionManager(true);
+                            setShowAdminMenu(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-left text-[11px] font-bold text-[#102604] uppercase tracking-wider transition-colors"
+                        >
+                          <Layers size={14} className="text-blue-500" />
+                          <span>Sections</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowAdviserAssignment(true);
+                            setShowAdminMenu(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-left text-[11px] font-bold text-[#102604] uppercase tracking-wider transition-colors"
+                        >
+                          <UserPlus size={14} className="text-[#76DA0D]" />
+                          <span>Set Adviser</span>
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={() => {
+                        setShowSignatorySettingsModal(true);
+                        setShowAdminMenu(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-left text-[11px] font-bold text-[#102604] uppercase tracking-wider transition-colors border-t border-slate-100"
+                    >
+                      <UserCheck size={14} className="text-orange-500" />
+                      <span>Signatories</span>
+                    </button>
+                    {user.role === 'Admin' && (
+                      <button
+                        onClick={() => {
+                          setShowAdminPasswordsModal(true);
+                          setShowAdminMenu(false);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-left text-[11px] font-bold text-[#102604] uppercase tracking-wider transition-colors border-t border-slate-100"
+                      >
+                        <Shield size={14} className="text-blue-500" />
+                        <span>Admin Passwords</span>
+                      </button>
+                    )}
+                    {(user.role === 'Admin' || user.role === 'Guidance') && (
+                      <button
+                        onClick={() => {
+                          setShowAuditLogs(true);
+                          setShowAdminMenu(false);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-left text-[11px] font-bold text-[#102604] uppercase tracking-wider transition-colors border-t border-slate-100"
+                      >
+                        <History size={14} className="text-[#76DA0D]" />
+                        <span>Audit Logs</span>
+                      </button>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          <NotificationBell 
+            user={user} 
+            onSelectNotification={(lrn) => {
+              setReportsViewerQuery(lrn);
+              setShowReportsViewer(true);
+            }} 
+          />
+
+          <button
+            id="logout-btn"
+            onClick={() => onLogout("Logged out successfully.")}
+            className="group flex items-center gap-2 px-4 py-2 bg-[#76DA0D] hover:bg-[#88F015] text-[#102604] border border-[#FFEA00] font-bold text-[10px] tracking-widest uppercase transition-all cursor-pointer select-none shadow-sm h-10"
+          >
+            <LogOut size={14} />
+            <span>Logout</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Main Workspace Stage */}
+      <div className="flex-1 max-w-7xl w-full mx-auto p-8 flex flex-col gap-8">
+        
+        {/* Stats Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.05 }}
+            className="bg-white p-6 border border-slate-200 shadow-sm rounded-sm hover:shadow-md transition-shadow"
+          >
+            <h6 className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Total Reports</h6>
+            <p className="text-3xl font-bold text-[#102604]">{stats.totalGeneral + stats.totalCritical + stats.totalCICL}</p>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.1 }}
+            className="bg-white p-6 border border-slate-200 shadow-sm rounded-sm hover:shadow-md transition-shadow"
+          >
+            <h6 className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">General</h6>
+            <p className="text-3xl font-bold text-[#76DA0D]">{stats.totalGeneral}</p>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.15 }}
+            className="bg-white p-6 border border-slate-200 shadow-sm rounded-sm hover:shadow-md transition-shadow"
+          >
+            <h6 className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Critical</h6>
+            <p className="text-3xl font-bold text-red-600">{stats.totalCritical}</p>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.2 }}
+            className="bg-white p-6 border border-slate-200 shadow-sm rounded-sm hover:shadow-md transition-shadow"
+          >
+            <h6 className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">CICL</h6>
+            <p className="text-3xl font-bold text-orange-600">{stats.totalCICL}</p>
+          </motion.div>
+        </div>
+        
+        {/* Content Area */}
+        <div id="dashboard-content-col" className="flex-1 flex flex-col gap-8">
+          {showAnalytics ? (
+            <DataAnalyticsView user={user} />
+          ) : user.role === 'Adviser' ? (
+            <StudentListDashboard user={user} />
+          ) : (
+            <motion.div 
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, delay: 0.25 }}
+              className="bg-white p-12 border border-slate-200 shadow-sm rounded-sm"
+            >
+              <h2 className="text-2xl font-bold text-[#102604] mb-4">Welcome, {user.firstName}</h2>
+              <p className="text-slate-600">Please select an action from the menu above to manage reports or view data.</p>
+            </motion.div>
+          )}
+
+                {/* New Search and Filterable Anecdote List */}
+                <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.3 }}
+                  className="w-full bg-white border border-slate-100 p-8 shadow-sm text-left mt-8 rounded-sm"
+                >
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-[#102604] flex items-center justify-center">
+                        <Table size={14} className="text-[#76DA0D]" />
+                      </div>
+                      <h5 className="text-[10px] font-bold uppercase tracking-widest text-slate-900">Recent Student Anecdotes</h5>
+                    </div>
+                    
+                    <div className="flex flex-wrap items-center gap-3">
+                      <AnimatePresence>
+                        {selectedReports.length > 0 && (
+                          <motion.div
+                            initial={{ opacity: 0, x: 20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            className="flex items-center gap-2 pr-4 border-r border-slate-200 mr-2"
+                          >
+                            <span className="text-[10px] font-black uppercase text-blue-500 mr-2 tabular-nums">{selectedReports.length} Selected</span>
+                            <button
+                              onClick={handleExportSelected}
+                              className="p-2 text-slate-400 hover:text-blue-500 transition-colors"
+                              title="Export Selected"
+                            >
+                              <Download size={16} />
+                            </button>
+                            <button
+                              onClick={handleDeleteSelected}
+                              className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+                              title="Delete Selected"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                      {/* Search Bar */}
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Search LRN, Issue..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 text-[11px] font-medium focus:outline-none focus:border-[#76DA0D] transition-colors w-full md:w-64"
+                        />
+                        <Compass className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                      </div>
+
+                      {/* Category Filter */}
+                      <select
+                        value={categoryFilter}
+                        onChange={(e) => setCategoryFilter(e.target.value)}
+                        className="px-3 py-2 bg-slate-50 border border-slate-200 text-[11px] font-bold uppercase tracking-widest focus:outline-none focus:border-[#76DA0D] cursor-pointer"
+                      >
+                        <option value="All">All Categories</option>
+                        <option value="Attendance">Attendance</option>
+                        <option value="Academic">Academic</option>
+                        <option value="Behavioral">Behavioral</option>
+                        <option value="Others">Others</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-[9px] font-black uppercase tracking-[0.2em] text-slate-400">
+                          <th className="py-4 px-2 text-left w-10">
+                            <button 
+                              onClick={() => handleSelectAll(filteredReports.slice(0, 10))}
+                              className="text-slate-300 hover:text-[#76DA0D] transition-colors"
+                            >
+                              {selectedReports.length === filteredReports.slice(0, 10).length && selectedReports.length > 0 
+                                ? <CheckSquare size={16} className="text-[#76DA0D]" /> 
+                                : <Square size={16} />
+                              }
+                            </button>
+                          </th>
+                          <th className="py-4 px-2 text-left w-24">Date</th>
+                          <th className="py-4 px-2 text-left w-32">Student LRN</th>
+                          <th className="py-4 px-2 text-left">Issue / Concern</th>
+                          <th className="py-4 px-2 text-left w-24">Category</th>
+                          <th className="py-4 px-2 text-left w-24">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {filteredReports.length > 0 ? (
+                          filteredReports.slice(0, 10).map((report, idx) => {
+                            const category = mapToCategory(report.issue);
+                            return (
+                              <motion.tr 
+                                key={`dash-${report.type}-${report.id}-${idx}`}
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ delay: idx * 0.05 }}
+                                className={`group hover:bg-slate-50/50 transition-colors ${selectedReports.some(r => r.id === report.id && r.type === report.type) ? 'bg-blue-50/30' : ''}`}
+                              >
+                                <td className="py-4 px-2">
+                                  <button 
+                                    onClick={() => handleSelectReport(report)}
+                                    className="text-slate-300 hover:text-[#76DA0D] transition-colors"
+                                  >
+                                    {selectedReports.some(r => r.id === report.id && r.type === report.type)
+                                      ? <CheckSquare size={16} className="text-[#76DA0D]" /> 
+                                      : <Square size={16} />
+                                    }
+                                  </button>
+                                </td>
+                                <td className="py-4 px-2 text-[10px] font-mono text-slate-500 whitespace-nowrap">{report.dateReported}</td>
+                                <td className="py-4 px-2 text-[11px] font-bold text-[#102604]">{report.studentLrn}</td>
+                                <td className="py-4 px-2">
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="text-[11px] font-bold text-slate-900 line-clamp-1">{report.issue}</span>
+                                    <span className="text-[10px] text-slate-400 line-clamp-1 italic">{report.description}</span>
+                                  </div>
+                                </td>
+                                <td className="py-4 px-2">
+                                  <span className={`text-[8px] font-black uppercase tracking-[0.15em] px-2.5 py-0.5 border ${
+                                    category === 'Attendance' ? 'border-blue-200 text-blue-600 bg-blue-50' :
+                                    category === 'Academic' ? 'border-orange-200 text-orange-600 bg-orange-50' :
+                                    category === 'Behavioral' ? 'border-red-200 text-red-600 bg-red-50' :
+                                    'border-slate-200 text-slate-500 bg-slate-50'
+                                  }`}>
+                                    {category}
+                                  </span>
+                                </td>
+                                <td className="py-4 px-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <div className={`w-1.5 h-1.5 rounded-full ${report.recordStatus === 'RESOLVED' ? 'bg-[#76DA0D]' : 'bg-orange-400'}`} />
+                                    <span className="text-[9px] font-bold uppercase tracking-tight text-slate-600">{report.recordStatus || 'CRITICAL'}</span>
+                                  </div>
+                                </td>
+                              </motion.tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="py-12 text-center text-[11px] text-slate-400 font-medium italic">
+                              No anecdotes found matching your criteria.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  
+                  {filteredReports.length > 10 && (
+                    <div className="mt-6 pt-6 border-t border-slate-100 flex justify-center">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Showing last 10 entries • {filteredReports.length} total results</p>
+                    </div>
+                  )}
+                </motion.div>
+
+                <div className="pt-8 flex flex-wrap justify-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-50 border border-slate-200 rounded-none text-[9px] font-bold uppercase tracking-wider font-sans text-slate-500">
+                    <ShieldCheck size={12} className="text-slate-600" />
+                    <span>Secure SH-256</span>
+                  </span>
+                  
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-50 border border-slate-200 rounded-none text-[9px] font-bold uppercase tracking-wider font-sans text-slate-500">
+                    <Sun size={12} className="text-slate-600 animate-pulse" />
+                    <span>Session Active</span>
+                  </span>
+                </div>
+
+      </div>
+
+      {/* Account Settings Overlay */}
+      <AnimatePresence>
+        {showSettings && (
+          <AccountSettingsView
+            user={user}
+            onClose={() => setShowSettings(false)}
+            onUpdateSuccess={(freshUser) => {
+              onUpdateUser(freshUser);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Register Student Overlay */}
+      <AnimatePresence>
+        {showDatabaseActions && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[#102604]/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white w-full max-w-md shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Database size={20} className="text-[#76DA0D]" />
+                  <h3 className="serif font-serif text-xl text-slate-900">Database Administration</h3>
+                </div>
+                <button onClick={() => setShowDatabaseActions(false)} className="text-slate-400 hover:text-slate-600 transition-colors">
+                  <Settings2 size={18} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                {adminAction ? (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-slate-50 border border-slate-200">
+                      <h4 className="text-xs font-bold text-slate-700 mb-2">
+                        {adminAction.type === "clear-reports" && "Clear All Reports"}
+                        {adminAction.type === "clear-students" && "Clear All Students"}
+                        {adminAction.type === "delete-teacher" && `Delete Teacher: ${adminAction.email}`}
+                      </h4>
+                      <input
+                        type="password"
+                        placeholder="Enter admin password"
+                        value={adminActionPassword}
+                        onChange={e => setAdminActionPassword(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-slate-300 focus:outline-none focus:border-red-500 mb-3"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setAdminAction(null);
+                            setAdminActionPassword("");
+                          }}
+                          className="flex-1 py-2 text-xs font-bold bg-white border border-slate-300 hover:bg-slate-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (!adminActionPassword) return notify("error", "Password is required");
+                            const pwd = adminActionPassword;
+                            const type = adminAction.type;
+                            const email = adminAction.email;
+                            
+                            setAdminAction(null);
+                            setAdminActionPassword("");
+
+                            if (type === "clear-reports") {
+                              confirm({
+                                title: "Clear Reports",
+                                message: "Are you sure you want to clear ALL student reports? This action is permanent and cannot be undone.",
+                                confirmText: "Clear All",
+                                variant: "danger",
+                                onConfirm: async () => {
+                                  try {
+                                    const res = await fetch(`/api/admin/clear-reports?password=${encodeURIComponent(pwd)}`, { method: "DELETE" });
+                                    if (res.ok) notify("success", "Institutional reports cleared successfully.");
+                                    else {
+                                      const errData = await res.json().catch(()=>({}));
+                                      notify("error", errData.error || "System failed to clear reports.");
+                                    }
+                                  } catch (e) { notify("error", "Network error during database operation."); }
+                                }
+                              });
+                            } else if (type === "clear-students") {
+                              confirm({
+                                title: "Clear Student Registry",
+                                message: "Are you sure you want to clear ALL registered students? This will remove all student records from the portal.",
+                                confirmText: "Clear Registry",
+                                variant: "danger",
+                                onConfirm: async () => {
+                                  try {
+                                    const res = await fetch(`/api/admin/clear-students?password=${encodeURIComponent(pwd)}`, { method: "DELETE" });
+                                    if (res.ok) notify("success", "Student registry cleared successfully.");
+                                    else {
+                                      const errData = await res.json().catch(()=>({}));
+                                      notify("error", errData.error || "System failed to clear student registry.");
+                                    }
+                                  } catch (e) { notify("error", "Network error during registry operation."); }
+                                }
+                              });
+                            } else if (type === "delete-teacher" && email) {
+                              confirm({
+                                title: "Delete Staff Account",
+                                message: `Are you sure you want to permanently delete account: ${email}? This user will lose all access immediately.`,
+                                confirmText: "Delete Account",
+                                variant: "danger",
+                                onConfirm: async () => {
+                                  try {
+                                    const res = await fetch(`/api/admin/delete-teacher?email=${encodeURIComponent(email)}&password=${encodeURIComponent(pwd)}`, { method: "DELETE" });
+                                    if (res.ok) notify("success", "Teacher account deleted successfully.");
+                                    else {
+                                      const data = await res.json().catch(()=>({}));
+                                      notify("error", data.error || "Failed to delete account.");
+                                    }
+                                  } catch (e) { notify("error", "Network error during account deletion."); }
+                                }
+                              });
+                            }
+                          }}
+                          className="flex-1 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700"
+                        >
+                          Confirm Action
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setAdminAction({ type: "clear-reports" })}
+                      className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-red-50 border border-slate-100 hover:border-red-200 transition-all group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Trash2 size={18} className="text-red-500" />
+                        <span className="text-[11px] font-bold text-slate-700 uppercase tracking-widest">Clear Reports</span>
+                      </div>
+                      <ArrowUpRight size={14} className="text-slate-300 group-hover:text-red-500 transition-colors" />
+                    </button>
+                    <button
+                      onClick={() => setAdminAction({ type: "clear-students" })}
+                      className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-red-50 border border-slate-100 hover:border-red-200 transition-all group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Trash2 size={18} className="text-red-500" />
+                        <span className="text-[11px] font-bold text-slate-700 uppercase tracking-widest">Clear Students</span>
+                      </div>
+                      <ArrowUpRight size={14} className="text-slate-300 group-hover:text-red-500 transition-colors" />
+                    </button>
+                    <div className="flex items-center gap-2 w-full p-4 bg-slate-50 hover:bg-red-50 border border-slate-100 hover:border-red-200 transition-all group cursor-default">
+                      <Trash2 size={18} className="text-red-500 shrink-0" />
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          id="teacher-email-input"
+                          type="email"
+                          placeholder="Teacher email to delete"
+                          className="w-full px-2 py-1 text-xs border border-slate-300 focus:outline-none focus:border-red-500"
+                        />
+                        <button
+                          onClick={() => {
+                            const email = (document.getElementById('teacher-email-input') as HTMLInputElement).value;
+                            if (email) {
+                              setAdminAction({ type: "delete-teacher", email });
+                            } else {
+                              notify("error", "Please enter an email first");
+                            }
+                          }}
+                          className="px-3 py-1 bg-red-600 text-white text-xs font-bold shrink-0"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+                <button
+                  onClick={() => setShowDatabaseActions(false)}
+                  className="px-6 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-800 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showSectionManager && (
+          <SectionManagerModal onClose={() => setShowSectionManager(false)} />
+        )}
+
+        {showReportsViewer && (
+          <ReportsViewerModal 
+            onClose={() => {
+              setShowReportsViewer(false);
+              setReportsViewerQuery("");
+            }} 
+            userEmail={user.email || ""}
+            userRole={user.role}
+            userGradeLevel={user.gradeLevel}
+            userSection={user.section}
+            userFirstName={user.firstName}
+            userLastName={user.lastName}
+            initialSearchQuery={reportsViewerQuery}
+            showOnlyResolved={false}
+          />
+        )}
+
+        {showResolvedReportsViewer && (
+          <ReportsViewerModal 
+            onClose={() => {
+              setShowResolvedReportsViewer(false);
+              setReportsViewerQuery("");
+            }} 
+            userEmail={user.email || ""}
+            userRole={user.role}
+            userGradeLevel={user.gradeLevel}
+            userSection={user.section}
+            userFirstName={user.firstName}
+            userLastName={user.lastName}
+            initialSearchQuery={reportsViewerQuery}
+            showOnlyResolved={true}
+          />
+        )}
+
+        {showPendingApprovalViewer && (
+          <ReportsViewerModal 
+            onClose={() => {
+              setShowPendingApprovalViewer(false);
+              setReportsViewerQuery("");
+            }} 
+            userEmail={user.email || ""}
+            userRole={user.role}
+            userGradeLevel={user.gradeLevel}
+            userSection={user.section}
+            userFirstName={user.firstName}
+            userLastName={user.lastName}
+            initialSearchQuery={reportsViewerQuery}
+            showOnlyResolved={false}
+            showOnlyPendingApproval={true}
+          />
+        )}
+
+        {showAdviserAssignment && (
+          <AdviserAssignmentModal onClose={() => setShowAdviserAssignment(false)} currentUserRole={user.role} />
+        )}
+
+        {showSignatorySettingsModal && (
+          <SignatorySettingsModal onClose={() => setShowSignatorySettingsModal(false)} />
+        )}
+        
+        {user.role === 'Admin' && showAdminPasswordsModal && (
+          <AdminPasswordsModal onClose={() => setShowAdminPasswordsModal(false)} userEmail={user.email} />
+        )}
+
+        <AuditLogModal
+          isOpen={showAuditLogs}
+          onClose={() => setShowAuditLogs(false)}
+        />
+
+        {showRegisterStudent && (
+          <RegisterStudentModal
+            registeredByEmail={user.email || ""}
+            onClose={() => setShowRegisterStudent(false)}
+          />
+        )}
+      </AnimatePresence>
+      
+      {/* Student Search Overlay */}
+      <AnimatePresence>
+        {showStudentSearch && (
+          <StudentSearchModal
+            userName={`${user.firstName} ${user.lastName}`}
+            onClose={() => setShowStudentSearch(false)}
+            onReportFiled={fetchData}
+          />
+        )}
+      </AnimatePresence>
+      
+      {/* CICL Report Overlay */}
+      <AnimatePresence>
+        {showCICLReport && (
+          <CICLSearchModal
+            userName={`${user.firstName} ${user.lastName}`}
+            onClose={() => setShowCICLReport(false)}
+            onReportFiled={fetchData}
+          />
+        )}
+      </AnimatePresence>
+      </div>
+    </div>
+  );
+}

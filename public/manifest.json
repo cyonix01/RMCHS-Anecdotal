@@ -1,0 +1,88 @@
+{
+  "name": "Project C.A.R.E. - Ramon Magsaysay High School",
+  "short_name": "Project CARE",
+  "description": "Ramon Magsaysay (Cubao) High School Counseling & Academic Records Engagement System",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#102604",
+  "theme_color": "#102604",
+  "lang": "en",
+  "dir": "ltr",
+  "prefer_related_applications": false,
+  "categories": [
+    "education",
+    "productivity",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "description": "Open Project CARE Main Dashboard",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "any"
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "short_name": "Analytics",
+      "description": "View Guidance Data Analytics",
+      "url": "/?view=analytics",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png",
+          "purpose": "any"
+        }
+      ]
+    }
+  ]
+}
